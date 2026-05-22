@@ -105,12 +105,30 @@ def accounts_list_kb(accounts: list[ParserAccount]) -> InlineKeyboardMarkup:
         builder.row(
             InlineKeyboardButton(
                 text=label,
-                callback_data=f"adm:acc:delete:{acc.id}",
+                callback_data=f"adm:acc:detail:{acc.id}",
                 style=style,
             )
         )
     builder.row(InlineKeyboardButton(text="➕ Добавить аккаунт", callback_data="adm:acc:add", style="primary"))
     builder.row(InlineKeyboardButton(text="◀ Назад", callback_data="adm:main", style="primary"))
+    return builder.as_markup()
+
+
+def account_detail_kb(acc_id: int, parse_joined: bool) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    joined_label = "✅ Парсить свои группы: ВКЛ" if parse_joined else "❌ Парсить свои группы: ВЫКЛ"
+    joined_style = "success" if parse_joined else "danger"
+    builder.row(InlineKeyboardButton(
+        text=joined_label,
+        callback_data=f"adm:acc:toggle_joined:{acc_id}",
+        style=joined_style,
+    ))
+    builder.row(InlineKeyboardButton(
+        text="🗑 Удалить аккаунт",
+        callback_data=f"adm:acc:delete:{acc_id}",
+        style="danger",
+    ))
+    builder.row(InlineKeyboardButton(text="◀ Назад", callback_data="adm:accounts", style="primary"))
     return builder.as_markup()
 
 
@@ -156,7 +174,31 @@ def category_detail_kb(cat_id: int) -> InlineKeyboardMarkup:
     builder.row(InlineKeyboardButton(text="➖ Удалить ключевое слово", callback_data=f"adm:cat:delkw:{cat_id}", style="danger"))
     builder.row(InlineKeyboardButton(text="🚫 Добавить минус-слово", callback_data=f"adm:cat:addsw:{cat_id}", style="primary"))
     builder.row(InlineKeyboardButton(text="✂️ Удалить минус-слово", callback_data=f"adm:cat:delsw:{cat_id}", style="danger"))
+    builder.row(InlineKeyboardButton(text="🤖 Аккаунты-парсеры", callback_data=f"adm:cat:accounts:{cat_id}", style="primary"))
     builder.row(InlineKeyboardButton(text="🔄 Вкл/Выкл", callback_data=f"adm:cat:toggle:{cat_id}", style="primary"))
     builder.row(InlineKeyboardButton(text="🗑 Удалить категорию", callback_data=f"adm:cat:delete:{cat_id}", style="danger"))
     builder.row(InlineKeyboardButton(text="◀ Назад", callback_data="adm:categories", style="primary"))
+    return builder.as_markup()
+
+
+def category_accounts_kb(cat_id: int, accounts: list[ParserAccount], assigned_ids: set[int]) -> InlineKeyboardMarkup:
+    """Список аккаунтов с тоглом — какие парсят эту категорию."""
+    builder = InlineKeyboardBuilder()
+    if not accounts:
+        builder.row(InlineKeyboardButton(text="⚠️ Нет аккаунтов", callback_data="noop", style="primary"))
+    for acc in accounts:
+        label = acc.phone or f"ID {acc.id}"
+        is_on = acc.id in assigned_ids
+        icon = "✅" if is_on else "☐"
+        style = "success" if is_on else "primary"
+        builder.row(InlineKeyboardButton(
+            text=f"{icon} {label}",
+            callback_data=f"adm:cat:acc_toggle:{cat_id}:{acc.id}",
+            style=style,
+        ))
+    note = (
+        "\n<i>Если ни один не выбран — парсят все аккаунты.</i>"
+        if not assigned_ids else ""
+    )
+    builder.row(InlineKeyboardButton(text="◀ Назад", callback_data=f"adm:cat:detail:{cat_id}", style="primary"))
     return builder.as_markup()

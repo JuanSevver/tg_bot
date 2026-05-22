@@ -6,7 +6,7 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.keyboards import accounts_list_kb, cancel_kb
+from bot.keyboards import accounts_list_kb, account_detail_kb, cancel_kb
 from bot.states import AccountSG
 from database.models import ParserAccount
 from parser.manager import parser_manager
@@ -127,6 +127,70 @@ async def _save_account(session: AsyncSession, phone: str | None, session_string
     session.add(acc)
     await session.commit()
     await parser_manager.reload_clients()
+
+
+@router.callback_query(F.data.startswith("adm:acc:detail:"))
+async def cb_acc_detail(callback: CallbackQuery, session: AsyncSession) -> None:
+    acc_id = int(callback.data.split(":")[-1])
+    result = await session.execute(select(ParserAccount).where(ParserAccount.id == acc_id))
+    acc = result.scalar_one_or_none()
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+
+    status = "🟢 активен" if acc.is_active and acc.is_valid else "🔴 неактивен/невалиден"
+    label = acc.phone or f"ID {acc.id}"
+    joined = "ВКЛ ✅" if acc.parse_joined_groups else "ВЫКЛ ❌"
+
+    text = (
+        f"🤖 <b>Аккаунт {label}</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📊 Статус: {status}\n"
+        f"📨 Спарсено сообщений: <b>{acc.messages_parsed}</b>\n\n"
+        f"📂 Парсинг собственных групп: <b>{joined}</b>\n\n"
+        "<i>Если включено — аккаунт будет также сканировать все группы, "
+        "в которых он состоит, а не только явно добавленные через «Группы».</i>"
+    )
+    await callback.message.edit_text(
+        text,
+        reply_markup=account_detail_kb(acc_id, acc.parse_joined_groups),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("adm:acc:toggle_joined:"))
+async def cb_acc_toggle_joined(callback: CallbackQuery, session: AsyncSession) -> None:
+    acc_id = int(callback.data.split(":")[-1])
+    result = await session.execute(select(ParserAccount).where(ParserAccount.id == acc_id))
+    acc = result.scalar_one_or_none()
+    if not acc:
+        await callback.answer("Аккаунт не найден.", show_alert=True)
+        return
+
+    acc.parse_joined_groups = not acc.parse_joined_groups
+    await session.commit()
+    await parser_manager.reload_clients()
+
+    status = "включён ✅" if acc.parse_joined_groups else "отключён ❌"
+    await callback.answer(f"Парсинг собственных групп {status}", show_alert=True)
+
+    label = acc.phone or f"ID {acc.id}"
+    joined = "ВКЛ ✅" if acc.parse_joined_groups else "ВЫКЛ ❌"
+    text = (
+        f"🤖 <b>Аккаунт {label}</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📊 Статус: {'🟢 активен' if acc.is_active and acc.is_valid else '🔴 неактивен'}\n"
+        f"📨 Спарсено сообщений: <b>{acc.messages_parsed}</b>\n\n"
+        f"📂 Парсинг собственных групп: <b>{joined}</b>\n\n"
+        "<i>Если включено — аккаунт будет также сканировать все группы, "
+        "в которых он состоит, а не только явно добавленные через «Группы».</i>"
+    )
+    await callback.message.edit_text(
+        text,
+        reply_markup=account_detail_kb(acc_id, acc.parse_joined_groups),
+        parse_mode="HTML",
+    )
 
 
 @router.callback_query(F.data.startswith("adm:acc:delete:"))

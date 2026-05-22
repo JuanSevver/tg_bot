@@ -64,9 +64,6 @@ async def _stats_text(session: AsyncSession) -> str:
 
 @router.message(Command("admin"))
 async def cmd_admin(message: Message, session: AsyncSession) -> None:
-    from config import load_config as _lc
-    import logging
-    logging.getLogger(__name__).info("Admin IDs: %s | Caller: %s", _lc().admin_ids, message.from_user.id)
     text = await _stats_text(session)
     await message.answer(text, reply_markup=admin_main_kb(), parse_mode="HTML")
 

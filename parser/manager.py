@@ -28,7 +28,7 @@ from sqlalchemy.orm import selectinload
 from database.db import async_session
 from database.models import (
     ParserAccount, TelegramGroup, Category, UserCategory,
-    ParsedMessage, User, Subscription,
+    ParsedMessage, User, Subscription, CategoryAccount,
 )
 from .client import make_client, proxy_tuple
 
@@ -110,10 +110,18 @@ _pending: dict[str, tuple[TelegramClient, str]] = {}
 
 class ParserManager:
     def __init__(self) -> None:
-        self._clients: list[TelegramClient] = []
+        # (client, acc_id) — для round-robin по явным группам
+        self._client_pairs: list[tuple[TelegramClient, int]] = []
+        # (client, acc_id) — аккаунты с parse_joined_groups=True
+        self._joined_pairs: list[tuple[TelegramClient, int]] = []
         self._cycle: itertools.cycle = itertools.cycle([])
         self._bot: "Bot | None" = None
         self._running = False
+
+    @property
+    def _clients(self) -> list[TelegramClient]:
+        """Обратная совместимость: список клиентов без acc_id."""
+        return [c for c, _ in self._client_pairs]
 
     def set_bot(self, bot: "Bot") -> None:
         self._bot = bot
@@ -132,12 +140,13 @@ class ParserManager:
                 pass
 
     async def reload_clients(self) -> None:
-        for c in self._clients:
+        for c, _ in self._client_pairs:
             try:
                 await c.disconnect()
             except Exception:
                 pass
-        self._clients.clear()
+        self._client_pairs.clear()
+        self._joined_pairs.clear()
 
         async with async_session() as session:
             result = await session.execute(
@@ -161,8 +170,10 @@ class ParserManager:
                 await client.connect()
                 if not await client.is_user_authorized():
                     raise AuthKeyUnregisteredError(request=None)
-                self._clients.append(client)
-                logger.info("Parser client account_%s started.", acc.id)
+                self._client_pairs.append((client, acc.id))
+                if acc.parse_joined_groups:
+                    self._joined_pairs.append((client, acc.id))
+                logger.info("Parser client account_%s started (joined=%s).", acc.id, acc.parse_joined_groups)
             except (AuthKeyUnregisteredError, UserDeactivatedError):
                 async with async_session() as db:
                     r = await db.execute(select(ParserAccount).where(ParserAccount.id == acc.id))
@@ -174,7 +185,7 @@ class ParserManager:
             except Exception as e:
                 logger.error("Failed to start client for account %s: %s", acc.id, e)
 
-        self._cycle = itertools.cycle(self._clients) if self._clients else itertools.cycle([])
+        self._cycle = itertools.cycle(self._client_pairs) if self._client_pairs else itertools.cycle([])
 
     # ------------------------------------------------------------------
     # Phone-based sign-in helpers
@@ -218,7 +229,7 @@ class ParserManager:
             await asyncio.sleep(30)
 
     async def _collect_messages(self) -> None:
-        if not self._clients:
+        if not self._client_pairs:
             return
 
         async with async_session() as session:
@@ -232,37 +243,143 @@ class ParserManager:
             )
             categories = cats_result.scalars().all()
 
-        if not groups or not categories:
+            # Карта: category_id → set of account_ids (пусто = все аккаунты)
+            ca_result = await session.execute(select(CategoryAccount))
+            cat_acc_map: dict[int, set[int]] = {}
+            for ca in ca_result.scalars().all():
+                cat_acc_map.setdefault(ca.category_id, set()).add(ca.account_id)
+
+        if not categories:
             return
 
+        # Множество явно добавленных ссылок — чтобы не дублировать в joined-режиме
+        explicit_links: set[str] = {g.link.lstrip("@").lower() for g in groups}
+
+        # 1. Явно добавленные группы (round-robin по клиентам)
         for group in groups:
-            client = next(self._cycle)
+            client, acc_id = next(self._cycle)
             try:
-                await self._process_group(client, group, categories)
+                await self._process_group(client, acc_id, group, categories, cat_acc_map)
             except FloodWaitError as e:
                 logger.warning("FloodWait %s sec for %s", e.seconds, group.link)
                 await asyncio.sleep(e.seconds)
             except Exception as e:
                 logger.error("Error processing group %s: %s", group.link, e)
 
+        # 2. Группы в которых состоят аккаунты с parse_joined_groups=True
+        for client, acc_id in self._joined_pairs:
+            try:
+                await self._process_joined_groups(client, acc_id, categories, cat_acc_map, explicit_links)
+            except FloodWaitError as e:
+                logger.warning("FloodWait %s sec scanning joined groups", e.seconds)
+                await asyncio.sleep(e.seconds)
+            except Exception as e:
+                logger.error("Error scanning joined groups: %s", e)
+
     async def _process_group(
         self,
         client: TelegramClient,
+        acc_id: int,
         group: TelegramGroup,
         categories: list[Category],
+        cat_acc_map: dict[int, set[int]],
     ) -> None:
         async with async_session() as session:
             try:
+                # Обычные сообщения группы / поста канала
                 async for message in client.iter_messages(group.link, limit=50):
                     if not message.text:
                         continue
-                    await self._handle_message(session, message, group, categories)
+                    await self._handle_message(session, message, categories, acc_id, cat_acc_map)
+
+                # Если это канал — дополнительно парсим комментарии к постам
+                if group.is_channel:
+                    async for post in client.iter_messages(group.link, limit=20):
+                        if not (post.replies and post.replies.replies):
+                            continue
+                        try:
+                            async for comment in client.iter_messages(
+                                group.link, reply_to=post.id, limit=30
+                            ):
+                                if not comment.text:
+                                    continue
+                                await self._handle_message(session, comment, categories, acc_id, cat_acc_map)
+                        except Exception:
+                            pass  # Не все каналы открыты для чтения комментариев
             except Exception as e:
                 logger.debug("Could not fetch history for %s: %s", group.link, e)
 
-    async def _handle_message(self, session, message, group: TelegramGroup, categories: list[Category]) -> None:
-        text_lower = (message.text or "").lower()
+    async def _process_joined_groups(
+        self,
+        client: TelegramClient,
+        acc_id: int,
+        categories: list[Category],
+        cat_acc_map: dict[int, set[int]],
+        skip_links: set[str],
+    ) -> None:
+        """Сканирует все группы/каналы в которых состоит аккаунт."""
+        try:
+            dialogs = await client.get_dialogs()
+        except Exception as e:
+            logger.error("Could not get dialogs: %s", e)
+            return
 
+        for dialog in dialogs:
+            # Только группы и каналы, пропускаем личные чаты и боты
+            if not (dialog.is_group or dialog.is_channel):
+                continue
+
+            # Пропускаем явно добавленные группы (они уже обработаны)
+            entity = dialog.entity
+            username = getattr(entity, "username", None)
+            if username and username.lower() in skip_links:
+                continue
+
+            chat_id = dialog.id
+            is_channel = dialog.is_channel and not dialog.is_group
+
+            try:
+                async with async_session() as session:
+                    async for message in client.iter_messages(chat_id, limit=50):
+                        if not message.text:
+                            continue
+                        await self._handle_message(session, message, categories, acc_id, cat_acc_map)
+
+                    # Комментарии к постам канала
+                    if is_channel:
+                        async for post in client.iter_messages(chat_id, limit=20):
+                            if not (post.replies and post.replies.replies):
+                                continue
+                            try:
+                                async for comment in client.iter_messages(
+                                    chat_id, reply_to=post.id, limit=30
+                                ):
+                                    if not comment.text:
+                                        continue
+                                    await self._handle_message(session, comment, categories, acc_id, cat_acc_map)
+                            except Exception:
+                                pass
+            except FloodWaitError as e:
+                logger.warning("FloodWait %s sec for joined group %s", e.seconds, chat_id)
+                await asyncio.sleep(e.seconds)
+            except Exception as e:
+                logger.debug("Could not fetch joined group %s: %s", chat_id, e)
+
+            # Небольшая пауза между группами чтобы не флудить
+            await asyncio.sleep(0.5)
+
+    async def _handle_message(
+        self,
+        session,
+        message,
+        categories: list[Category],
+        acc_id: int,
+        cat_acc_map: dict[int, set[int]],
+    ) -> None:
+        text = message.text or ""
+        text_lower = text.lower()
+
+        # 1. Дедупликация по (group_id, message_id) — одно и то же сообщение не обрабатываем дважды
         check = await session.execute(
             select(ParsedMessage).where(
                 ParsedMessage.group_id == message.chat_id,
@@ -272,8 +389,29 @@ class ParserManager:
         if check.scalar_one_or_none():
             return
 
+        # 2. Получаем отправителя заранее для дедупликации по автору
+        sender = await message.get_sender()
+        author_id = sender.id if sender else None
+
+        # 3. Дедупликация по автору: если тот же автор уже присылал идентичный текст — пропускаем
+        if author_id and text:
+            author_dup = await session.execute(
+                select(ParsedMessage).where(
+                    ParsedMessage.author_id == author_id,
+                    ParsedMessage.text == text,
+                ).limit(1)
+            )
+            if author_dup.scalar_one_or_none():
+                return
+
+        # 4. Фильтрация категорий по аккаунту
+        applicable = [
+            cat for cat in categories
+            if not cat_acc_map.get(cat.id) or acc_id in cat_acc_map[cat.id]
+        ]
+
         matched_cat = None
-        for cat in categories:
+        for cat in applicable:
             # Проверяем минус-слова — если есть, категория не подходит
             stop_words = cat.get_stop_words()
             if stop_words and _has_stop_word(stop_words, text_lower):
@@ -291,8 +429,6 @@ class ParserManager:
         if not matched_cat:
             return
 
-        sender = await message.get_sender()
-        author_id = sender.id if sender else None
         author_username = getattr(sender, "username", None)
         author_link = f"https://t.me/{author_username}" if author_username else (
             f"tg://user?id={author_id}" if author_id else None

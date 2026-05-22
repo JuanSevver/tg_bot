@@ -6,9 +6,9 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.keyboards import categories_list_kb, category_detail_kb, cancel_kb
+from bot.keyboards import categories_list_kb, category_detail_kb, category_accounts_kb, cancel_kb
 from bot.states import CategorySG
-from database.models import Category, CategoryType, UserCategory, User
+from database.models import Category, CategoryType, UserCategory, User, CategoryAccount, ParserAccount
 
 router = Router(name="admin_categories")
 
@@ -297,3 +297,66 @@ async def cb_cat_delete(callback: CallbackQuery, state: FSMContext, session: Asy
         parse_mode="HTML",
     )
     await state.set_state(CategorySG.list)
+
+
+async def _show_cat_accounts(callback: CallbackQuery, session: AsyncSession, cat_id: int) -> None:
+    """Показывает страницу привязки аккаунтов к категории."""
+    cat_r = await session.execute(select(Category).where(Category.id == cat_id))
+    cat = cat_r.scalar_one_or_none()
+    if not cat:
+        await callback.answer("Категория не найдена.", show_alert=True)
+        return
+
+    accs_r = await session.execute(select(ParserAccount).order_by(ParserAccount.id))
+    accounts = accs_r.scalars().all()
+
+    assigned_r = await session.execute(
+        select(CategoryAccount).where(CategoryAccount.category_id == cat_id)
+    )
+    assigned_ids = {ca.account_id for ca in assigned_r.scalars().all()}
+
+    note = "  <i>Ни один не выбран — парсят все аккаунты.</i>" if not assigned_ids else ""
+    text = (
+        f"🤖 <b>Аккаунты для «{cat.name}»</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "Выберите какие аккаунты будут собирать сообщения для этой категории.\n"
+        f"{note}"
+    )
+    await callback.message.edit_text(
+        text,
+        reply_markup=category_accounts_kb(cat_id, list(accounts), assigned_ids),
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("adm:cat:accounts:"))
+async def cb_cat_accounts(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    cat_id = int(callback.data.split(":")[-1])
+    await _show_cat_accounts(callback, session, cat_id)
+
+
+@router.callback_query(F.data.startswith("adm:cat:acc_toggle:"))
+async def cb_cat_acc_toggle(callback: CallbackQuery, session: AsyncSession) -> None:
+    # adm:cat:acc_toggle:{cat_id}:{acc_id}
+    parts = callback.data.split(":")
+    cat_id, acc_id = int(parts[-2]), int(parts[-1])
+
+    existing = await session.execute(
+        select(CategoryAccount).where(
+            CategoryAccount.category_id == cat_id,
+            CategoryAccount.account_id == acc_id,
+        )
+    )
+    ca = existing.scalar_one_or_none()
+
+    if ca:
+        await session.delete(ca)
+        await session.commit()
+        await callback.answer("Аккаунт откреплён от категории.", show_alert=False)
+    else:
+        session.add(CategoryAccount(category_id=cat_id, account_id=acc_id))
+        await session.commit()
+        await callback.answer("Аккаунт привязан к категории.", show_alert=False)
+
+    await _show_cat_accounts(callback, session, cat_id)

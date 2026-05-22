@@ -77,6 +77,9 @@ class Category(Base):
     groups: Mapped[list[GroupCategory]] = relationship(
         "GroupCategory", back_populates="category", cascade="all, delete-orphan", passive_deletes=True,
     )
+    account_assignments: Mapped[list[CategoryAccount]] = relationship(
+        "CategoryAccount", back_populates="category", cascade="all, delete-orphan", passive_deletes=True,
+    )
 
     def get_keywords(self) -> list[str]:
         """Возвращает список фраз (каждая строка — отдельная фраза)."""
@@ -151,15 +154,32 @@ class ParserAccount(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     phone: Mapped[str | None] = mapped_column(String(32))
-    session_string: Mapped[str | None] = mapped_column(Text)  # Pyrogram StringSession
+    session_string: Mapped[str | None] = mapped_column(Text)  # Telethon StringSession
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_valid: Mapped[bool] = mapped_column(Boolean, default=True)
     proxy_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("proxies.id"))
+    parse_joined_groups: Mapped[bool] = mapped_column(Boolean, default=False)
     added_at: Mapped[datetime] = mapped_column(DateTime, default=func.now())
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime)
     messages_parsed: Mapped[int] = mapped_column(Integer, default=0)
 
     proxy: Mapped[Proxy | None] = relationship("Proxy", back_populates="accounts")
+    category_assignments: Mapped[list[CategoryAccount]] = relationship(
+        "CategoryAccount", back_populates="account", cascade="all, delete-orphan", passive_deletes=True,
+    )
+
+
+class CategoryAccount(Base):
+    """Привязка аккаунта к категории. Если для категории нет записей — парсят все аккаунты."""
+    __tablename__ = "category_accounts"
+    __table_args__ = (UniqueConstraint("category_id", "account_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    category_id: Mapped[int] = mapped_column(Integer, ForeignKey("categories.id", ondelete="CASCADE"))
+    account_id: Mapped[int] = mapped_column(Integer, ForeignKey("parser_accounts.id", ondelete="CASCADE"))
+
+    category: Mapped[Category] = relationship("Category", back_populates="account_assignments")
+    account: Mapped[ParserAccount] = relationship("ParserAccount", back_populates="category_assignments")
 
 
 class ParsedMessage(Base):

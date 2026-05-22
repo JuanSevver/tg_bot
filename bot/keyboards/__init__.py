@@ -5,8 +5,8 @@ from .user_kb import (
 from .admin_kb import (
     admin_main_kb, users_list_kb, broadcast_target_kb,
     broadcast_content_type_kb, groups_list_kb,
-    accounts_list_kb, proxies_list_kb, categories_list_kb,
-    category_detail_kb, user_detail_kb, cancel_kb,
+    accounts_list_kb, account_detail_kb, proxies_list_kb, categories_list_kb,
+    category_detail_kb, category_accounts_kb, user_detail_kb, cancel_kb,
 )
 
 __all__ = [
@@ -14,6 +14,6 @@ __all__ = [
     "subscription_kb", "payment_kb", "categories_kb",
     "admin_main_kb", "users_list_kb", "broadcast_target_kb",
     "broadcast_content_type_kb", "groups_list_kb",
-    "accounts_list_kb", "proxies_list_kb", "categories_list_kb",
-    "category_detail_kb", "user_detail_kb", "cancel_kb",
+    "accounts_list_kb", "account_detail_kb", "proxies_list_kb", "categories_list_kb",
+    "category_detail_kb", "category_accounts_kb", "user_detail_kb", "cancel_kb",
 ]
