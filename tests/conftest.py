@@ -68,7 +68,7 @@ def make_category():
         cat_id: int = 1,
         name: str = "Дизайн",
         cat_type: CategoryType = CategoryType.request,
-        keywords: str = "логотип,дизайн,баннер",
+        keywords: str = "логотип\nдизайн\nбаннер",
     ) -> Category:
         return Category(id=cat_id, name=name, type=cat_type, keywords=keywords, is_active=True)
     return _make

@@ -85,13 +85,13 @@ class Category(Base):
 
     def get_keywords(self) -> list[str]:
         """Возвращает список фраз (каждая строка — отдельная фраза)."""
-        return [k.strip().lower() for k in self.keywords.splitlines() if k.strip()]
+        return [k.strip().lower() for k in (self.keywords or "").splitlines() if k.strip()]
 
     def set_keywords(self, kws: list[str]) -> None:
         self.keywords = "\n".join(k.strip().lower() for k in kws if k.strip())
 
     def get_stop_words(self) -> list[str]:
-        return [w.strip().lower() for w in self.stop_words.splitlines() if w.strip()]
+        return [w.strip().lower() for w in (self.stop_words or "").splitlines() if w.strip()]
 
     def set_stop_words(self, words: list[str]) -> None:
         self.stop_words = "\n".join(w.strip().lower() for w in words if w.strip())

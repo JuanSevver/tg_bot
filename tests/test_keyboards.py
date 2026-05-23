@@ -155,14 +155,19 @@ class TestSubscriptionKeyboard:
 
 class TestAdminKeyboards:
     def test_admin_main_has_all_sections(self):
-        kb = admin_main_kb()
+        kb = admin_main_kb(bot_username="testbot")
         cbs = _get_callback_datas(kb)
-        assert "adm:users" in cbs
+        # Users section moved to inline — no adm:users callback anymore
         assert "adm:broadcast" in cbs
         assert "adm:groups" in cbs
         assert "adm:accounts" in cbs
         assert "adm:proxies" in cbs
         assert "adm:categories" in cbs
+
+    def test_admin_main_has_inline_users_button(self):
+        kb = admin_main_kb(bot_username="testbot")
+        texts = _get_button_texts(kb)
+        assert any("Найти пользователя" in t for t in texts)
 
     def test_proxies_list_has_delete_button(self):
         proxy = Proxy(id=1, host="1.2.3.4", port=1080, type="socks5")

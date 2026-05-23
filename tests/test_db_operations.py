@@ -102,7 +102,7 @@ class TestSubscriptionPersistence:
 
 class TestCategoryPersistence:
     async def test_create_category(self, session, make_category):
-        cat = make_category(cat_id=1, name="Дизайн", keywords="лого,баннер")
+        cat = make_category(cat_id=1, name="Дизайн", keywords="лого\nбаннер")
         session.add(cat)
         await session.commit()
 
@@ -144,7 +144,7 @@ class TestCategoryPersistence:
         assert all(uc.enabled for uc in ucs)
 
     async def test_add_keyword_dedup(self, session, make_category):
-        cat = make_category(keywords="дизайн,логотип")
+        cat = make_category(keywords="дизайн\nлоготип")
         session.add(cat)
         await session.commit()
 
@@ -161,7 +161,7 @@ class TestCategoryPersistence:
         assert "баннер" in kws
 
     async def test_delete_keyword(self, session, make_category):
-        cat = make_category(keywords="дизайн,логотип,баннер")
+        cat = make_category(keywords="дизайн\nлоготип\nбаннер")
         session.add(cat)
         await session.commit()
 
