@@ -70,28 +70,29 @@ async def inline_users(query: InlineQuery, session: AsyncSession) -> None:
         return
 
     search = query.query.strip().lstrip("@")
+
     if not search:
-        await query.answer(
-            [],
-            cache_time=1,
-            switch_pm_text="🔍 Введите username или ID пользователя",
-            switch_pm_parameter="start",
+        # Empty query — show latest 50 users as a list
+        result = await session.execute(
+            select(User)
+            .options(selectinload(User.subscription))
+            .order_by(User.created_at.desc())
+            .limit(50)
         )
-        return
+    else:
+        # Search by username or Telegram ID
+        try:
+            uid = int(search)
+            cond = or_(User.id == uid, User.username.ilike(f"%{search}%"))
+        except ValueError:
+            cond = User.username.ilike(f"%{search}%")
+        result = await session.execute(
+            select(User)
+            .where(cond)
+            .options(selectinload(User.subscription))
+            .limit(20)
+        )
 
-    # Search by username or Telegram ID
-    try:
-        uid = int(search)
-        cond = or_(User.id == uid, User.username.ilike(f"%{search}%"))
-    except ValueError:
-        cond = User.username.ilike(f"%{search}%")
-
-    result = await session.execute(
-        select(User)
-        .where(cond)
-        .options(selectinload(User.subscription))
-        .limit(20)
-    )
     users = result.scalars().all()
 
     if not users:
