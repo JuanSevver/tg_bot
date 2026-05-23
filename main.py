@@ -8,7 +8,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 from config import load_config
 from database import init_db
-from bot.middlewares import DatabaseMiddleware, ActivityMiddleware
+from bot.middlewares import DatabaseMiddleware, ActivityMiddleware, AutoAnswerMiddleware
 from bot.handlers.user import user_router
 from bot.handlers.admin import admin_router
 from parser.manager import parser_manager
@@ -36,6 +36,7 @@ async def main() -> None:
 
     dp.update.middleware(DatabaseMiddleware())
     dp.update.middleware(ActivityMiddleware())
+    dp.callback_query.middleware(AutoAnswerMiddleware())
 
     dp.include_router(admin_router)
     dp.include_router(user_router)
