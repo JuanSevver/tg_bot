@@ -39,6 +39,25 @@ logger = logging.getLogger(__name__)
 
 # Порог схожести для однословных ключей и минус-слов
 FUZZY_THRESHOLD = 82
+
+
+def _extract_username(link: str) -> str:
+    """Нормализует ссылку на группу к юзернейму (без @, в нижнем регистре).
+
+    Примеры:
+      https://t.me/mygroup  →  mygroup
+      @mygroup              →  mygroup
+      t.me/mygroup          →  mygroup
+    """
+    link = link.strip().lower()
+    for prefix in ("https://t.me/", "http://t.me/", "t.me/"):
+        if link.startswith(prefix):
+            link = link[len(prefix):]
+            break
+    link = link.lstrip("@")
+    # Убираем trailing slash, query params, пути вида joinchat/...
+    link = link.split("/")[0].split("?")[0]
+    return link
 # Порог схожести для многословных фраз (сравниваем всю фразу с окном текста)
 PHRASE_THRESHOLD = 78
 
@@ -253,7 +272,7 @@ class ParserManager:
             return
 
         # Множество явно добавленных ссылок — чтобы не дублировать в joined-режиме
-        explicit_links: set[str] = {g.link.lstrip("@").lower() for g in groups}
+        explicit_links: set[str] = {_extract_username(g.link) for g in groups}
 
         # 1. Явно добавленные группы (round-robin по клиентам)
         for group in groups:
@@ -284,28 +303,32 @@ class ParserManager:
         categories: list[Category],
         cat_acc_map: dict[int, set[int]],
     ) -> None:
+        # Telethon принимает username (без @), полный URL t.me/... или числовой id
+        target = group.link
         async with async_session() as session:
             try:
-                # Обычные сообщения группы / поста канала
-                async for message in client.iter_messages(group.link, limit=50):
+                # Обычные сообщения группы / постов канала
+                async for message in client.iter_messages(target, limit=50):
                     if not message.text:
                         continue
                     await self._handle_message(session, message, categories, acc_id, cat_acc_map)
 
                 # Если это канал — дополнительно парсим комментарии к постам
                 if group.is_channel:
-                    async for post in client.iter_messages(group.link, limit=20):
+                    async for post in client.iter_messages(target, limit=20):
                         if not (post.replies and post.replies.replies):
                             continue
                         try:
                             async for comment in client.iter_messages(
-                                group.link, reply_to=post.id, limit=30
+                                target, reply_to=post.id, limit=30
                             ):
                                 if not comment.text:
                                     continue
                                 await self._handle_message(session, comment, categories, acc_id, cat_acc_map)
                         except Exception:
                             pass  # Не все каналы открыты для чтения комментариев
+            except FloodWaitError:
+                raise  # Пробрасываем — обрабатывается в _collect_messages
             except Exception as e:
                 logger.debug("Could not fetch history for %s: %s", group.link, e)
 
@@ -329,10 +352,10 @@ class ParserManager:
             if not (dialog.is_group or dialog.is_channel):
                 continue
 
-            # Пропускаем явно добавленные группы (они уже обработаны)
+            # Пропускаем явно добавленные группы (они уже обработаны round-robin)
             entity = dialog.entity
             username = getattr(entity, "username", None)
-            if username and username.lower() in skip_links:
+            if username and _extract_username(username) in skip_links:
                 continue
 
             chat_id = dialog.id
@@ -389,9 +412,14 @@ class ParserManager:
         if check.scalar_one_or_none():
             return
 
-        # 2. Получаем отправителя заранее для дедупликации по автору
-        sender = await message.get_sender()
-        author_id = sender.id if sender else None
+        # 2. Получаем отправителя — сначала из кеша сообщения, API не вызываем
+        sender = message.sender  # уже загружен вместе с сообщением
+        if sender is None:
+            try:
+                sender = await message.get_sender()
+            except Exception:
+                sender = None
+        author_id = getattr(sender, "id", None)
 
         # 3. Дедупликация по автору: если тот же автор уже присылал идентичный текст — пропускаем
         if author_id and text:
