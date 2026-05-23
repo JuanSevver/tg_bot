@@ -120,7 +120,10 @@ async def cb_grant_sub(callback: CallbackQuery, state: FSMContext, session: Asyn
     user_id = int(callback.data.split(":")[-1])
     await state.update_data(target_user_id=user_id)
     await state.set_state(UserManageSG.grant_subscription)
-    await callback.message.edit_text(
+    # Отправляем новым сообщением — callback может прийти из inline-режима,
+    # где callback.message is None (только inline_message_id)
+    await callback.bot.send_message(
+        callback.from_user.id,
         "🎁 <b>Выдать подписку</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
         "Введите количество дней:\n"
@@ -194,7 +197,10 @@ async def cb_send_msg_to_user(callback: CallbackQuery, state: FSMContext) -> Non
     user_id = int(callback.data.split(":")[-1])
     await state.update_data(target_user_id=user_id)
     await state.set_state(UserManageSG.send_message)
-    await callback.message.edit_text(
+    # Отправляем новым сообщением — callback может прийти из inline-режима,
+    # где callback.message is None (только inline_message_id)
+    await callback.bot.send_message(
+        callback.from_user.id,
         "✉ Введите текст сообщения для отправки пользователю:",
         reply_markup=cancel_kb(f"adm:user:{user_id}"),
     )
