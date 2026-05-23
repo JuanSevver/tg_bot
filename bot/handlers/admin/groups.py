@@ -54,20 +54,36 @@ async def cb_group_add(callback: CallbackQuery, state: FSMContext) -> None:
 @router.message(GroupSG.add_link)
 async def process_group_link(message: Message, state: FSMContext, session: AsyncSession) -> None:
     link = message.text.strip()
+
     result = await session.execute(select(TelegramGroup).where(TelegramGroup.link == link))
-    existing = result.scalar_one_or_none()
-    if existing:
+    if result.scalar_one_or_none():
         await message.answer("⚠️ Эта группа уже добавлена.", reply_markup=cancel_kb("adm:groups", "◀ К списку групп"))
         return
 
-    group = TelegramGroup(link=link)
+    # Пробуем определить название и тип через парсер
+    title: str | None = None
+    is_channel = False
+    try:
+        from parser.manager import parser_manager
+        from telethon.tl.types import Channel
+        clients = parser_manager._clients
+        if clients:
+            entity = await clients[0].get_entity(link)
+            title = getattr(entity, "title", None)
+            is_channel = isinstance(entity, Channel) and entity.broadcast
+    except Exception:
+        pass  # Нет аккаунтов или ссылка нерабочая — добавим без метаданных
+
+    group = TelegramGroup(link=link, title=title, is_channel=is_channel)
     session.add(group)
     await session.commit()
 
+    type_label = "📢 Канал" if is_channel else "👥 Группа"
+    display = title or link
     result2 = await session.execute(select(TelegramGroup).order_by(TelegramGroup.added_at.desc()))
     groups = result2.scalars().all()
     await message.answer(
-        f"✅ Группа <code>{link}</code> добавлена.\n\n"
+        f"✅ {type_label} <b>{display}</b> добавлен(а).\n\n"
         f"🔗 <b>Группы/каналы</b> ({len(groups)})",
         reply_markup=groups_list_kb(list(groups)),
         parse_mode="HTML",

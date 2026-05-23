@@ -307,20 +307,33 @@ class ParserManager:
         target = group.link
         async with async_session() as session:
             try:
+                # Определяем тип группы при первом обходе (канал или нет)
+                entity = await client.get_entity(target)
+                from telethon.tl.types import Channel
+                actually_channel = isinstance(entity, Channel) and entity.broadcast
+
+                # Если тип изменился с момента добавления — обновляем в БД
+                if group.is_channel != actually_channel:
+                    db_grp = await session.get(TelegramGroup, group.id)
+                    if db_grp:
+                        db_grp.is_channel = actually_channel
+                        await session.commit()
+                    group.is_channel = actually_channel  # обновляем и локальный объект
+
                 # Обычные сообщения группы / постов канала
-                async for message in client.iter_messages(target, limit=50):
+                async for message in client.iter_messages(entity, limit=50):
                     if not message.text:
                         continue
                     await self._handle_message(session, message, categories, acc_id, cat_acc_map)
 
                 # Если это канал — дополнительно парсим комментарии к постам
                 if group.is_channel:
-                    async for post in client.iter_messages(target, limit=20):
+                    async for post in client.iter_messages(entity, limit=20):
                         if not (post.replies and post.replies.replies):
                             continue
                         try:
                             async for comment in client.iter_messages(
-                                target, reply_to=post.id, limit=30
+                                entity, reply_to=post.id, limit=30
                             ):
                                 if not comment.text:
                                     continue
@@ -330,7 +343,7 @@ class ParserManager:
             except FloodWaitError:
                 raise  # Пробрасываем — обрабатывается в _collect_messages
             except Exception as e:
-                logger.debug("Could not fetch history for %s: %s", group.link, e)
+                logger.warning("Could not process group %s: %s", group.link, e)
 
     async def _process_joined_groups(
         self,
