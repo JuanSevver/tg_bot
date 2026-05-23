@@ -1,0 +1,9 @@
+{
+  "tests/test_models.py::TestCategoryKeywords::test_get_keywords_parses_comma_separated": true,
+  "tests/test_models.py::TestCategoryKeywords::test_get_keywords_skips_blank_entries": true,
+  "tests/test_models.py::TestCategoryKeywords::test_keyword_dedup_preserved_on_add": true,
+  "tests/test_parser_logic.py::TestKeywordMatching::test_matches_single_keyword": true,
+  "tests/test_parser_logic.py::TestKeywordMatching::test_multiple_keywords_in_message": true,
+  "tests/test_parser_logic.py::TestKeywordMatching::test_keyword_with_spaces_stripped": true,
+  "tests/test_keyboards.py::TestAdminKeyboards::test_groups_list_toggle_callback": true
+}

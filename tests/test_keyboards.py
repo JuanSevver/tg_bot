@@ -248,11 +248,12 @@ class TestAdminKeyboards:
         assert "adm:cat:create:request" in cbs
         assert "adm:cat:create:offer" in cbs
 
-    def test_groups_list_toggle_callback(self):
+    def test_groups_list_detail_callback(self):
         from datetime import datetime
         g = TelegramGroup(id=7, link="https://t.me/test", title="Test", is_active=True, added_at=datetime.utcnow())
         kb = groups_list_kb([g])
-        assert "adm:grp:toggle:7" in _get_callback_datas(kb)
+        # Clicking a group now opens detail page, not direct toggle
+        assert "adm:grp:detail:7" in _get_callback_datas(kb)
 
     def test_groups_list_add_button(self):
         kb = groups_list_kb([])

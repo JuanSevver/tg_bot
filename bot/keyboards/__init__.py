@@ -7,6 +7,7 @@ from .admin_kb import (
     broadcast_content_type_kb, groups_list_kb,
     accounts_list_kb, account_detail_kb, proxies_list_kb, categories_list_kb,
     category_detail_kb, category_accounts_kb, user_detail_kb, cancel_kb,
+    group_detail_kb, group_categories_kb,
 )
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "broadcast_content_type_kb", "groups_list_kb",
     "accounts_list_kb", "account_detail_kb", "proxies_list_kb", "categories_list_kb",
     "category_detail_kb", "category_accounts_kb", "user_detail_kb", "cancel_kb",
+    "group_detail_kb", "group_categories_kb",
 ]

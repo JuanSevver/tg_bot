@@ -92,12 +92,61 @@ def groups_list_kb(groups: list[TelegramGroup]) -> InlineKeyboardMarkup:
         builder.row(
             InlineKeyboardButton(
                 text=f"{status}  {title[:35]}",
-                callback_data=f"adm:grp:toggle:{g.id}",
+                callback_data=f"adm:grp:detail:{g.id}",
                 style=style,
             )
         )
     builder.row(InlineKeyboardButton(text="➕ Добавить группу", callback_data="adm:grp:add", style="primary"))
     builder.row(InlineKeyboardButton(text="◀ Назад", callback_data="adm:main", style="primary"))
+    return builder.as_markup()
+
+
+def group_detail_kb(group: TelegramGroup, assigned_count: int) -> InlineKeyboardMarkup:
+    """Страница деталей одной группы."""
+    builder = InlineKeyboardBuilder()
+    active_label = "✅ Активна — выключить" if group.is_active else "❌ Выключена — включить"
+    active_style = "success" if group.is_active else "danger"
+    builder.row(InlineKeyboardButton(
+        text=active_label,
+        callback_data=f"adm:grp:toggle:{group.id}",
+        style=active_style,
+    ))
+    cats_label = f"📂 Категории ({assigned_count if assigned_count else 'все'})"
+    builder.row(InlineKeyboardButton(
+        text=cats_label,
+        callback_data=f"adm:grp:cats:{group.id}",
+        style="primary",
+    ))
+    builder.row(InlineKeyboardButton(
+        text="🗑 Удалить группу",
+        callback_data=f"adm:grp:delete:{group.id}",
+        style="danger",
+    ))
+    builder.row(InlineKeyboardButton(text="◀ Назад к списку", callback_data="adm:groups", style="primary"))
+    return builder.as_markup()
+
+
+def group_categories_kb(
+    group_id: int,
+    categories: list[Category],
+    assigned_ids: set[int],
+) -> InlineKeyboardMarkup:
+    """Список категорий с тоглами для конкретной группы."""
+    builder = InlineKeyboardBuilder()
+    for cat in categories:
+        is_on = cat.id in assigned_ids
+        icon = "✅" if is_on else "☐"
+        style = "success" if is_on else "primary"
+        builder.row(InlineKeyboardButton(
+            text=f"{icon} {cat.name}",
+            callback_data=f"adm:grp:cat_toggle:{group_id}:{cat.id}",
+            style=style,
+        ))
+    builder.row(InlineKeyboardButton(
+        text="◀ Назад к группе",
+        callback_data=f"adm:grp:detail:{group_id}",
+        style="primary",
+    ))
     return builder.as_markup()
 
 

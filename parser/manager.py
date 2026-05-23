@@ -28,7 +28,7 @@ from sqlalchemy.orm import selectinload
 from database.db import async_session
 from database.models import (
     ParserAccount, TelegramGroup, Category, UserCategory,
-    ParsedMessage, User, Subscription, CategoryAccount,
+    ParsedMessage, User, Subscription, CategoryAccount, GroupCategory,
 )
 from .client import make_client, proxy_tuple
 
@@ -270,17 +270,30 @@ class ParserManager:
             for ca in ca_result.scalars().all():
                 cat_acc_map.setdefault(ca.category_id, set()).add(ca.account_id)
 
+            # Карта: group_id → list[Category]  (пусто = все категории)
+            gc_result = await session.execute(select(GroupCategory))
+            group_cat_map: dict[int, list[Category]] = {}
+            cat_by_id = {c.id: c for c in categories}
+            for gc in gc_result.scalars().all():
+                if gc.category_id in cat_by_id:
+                    group_cat_map.setdefault(gc.group_id, []).append(cat_by_id[gc.category_id])
+
         if not categories:
             return
 
-        # Множество явно добавленных ссылок — чтобы не дублировать в joined-режиме
-        explicit_links: set[str] = {_extract_username(g.link) for g in groups}
+        # Словарь username → TelegramGroup — для joined-групп
+        link_to_group: dict[str, TelegramGroup] = {
+            _extract_username(g.link): g for g in groups
+        }
+        explicit_links: set[str] = set(link_to_group.keys())
 
         # 1. Явно добавленные группы (round-robin по клиентам)
         for group in groups:
             client, acc_id = next(self._cycle)
+            # Используем категории группы; если не назначены — все категории
+            group_cats = group_cat_map.get(group.id) or categories
             try:
-                await self._process_group(client, acc_id, group, categories, cat_acc_map)
+                await self._process_group(client, acc_id, group, group_cats, cat_acc_map)
             except FloodWaitError as e:
                 logger.warning("FloodWait %s sec for %s", e.seconds, group.link)
                 await asyncio.sleep(e.seconds)
@@ -290,7 +303,10 @@ class ParserManager:
         # 2. Группы в которых состоят аккаунты с parse_joined_groups=True
         for client, acc_id in self._joined_pairs:
             try:
-                await self._process_joined_groups(client, acc_id, categories, cat_acc_map, explicit_links)
+                await self._process_joined_groups(
+                    client, acc_id, categories, cat_acc_map,
+                    explicit_links, link_to_group, group_cat_map,
+                )
             except FloodWaitError as e:
                 logger.warning("FloodWait %s sec scanning joined groups", e.seconds)
                 await asyncio.sleep(e.seconds)
@@ -354,8 +370,15 @@ class ParserManager:
         categories: list[Category],
         cat_acc_map: dict[int, set[int]],
         skip_links: set[str],
+        link_to_group: dict[str, "TelegramGroup"],
+        group_cat_map: dict[int, list[Category]],
     ) -> None:
-        """Сканирует все группы/каналы в которых состоит аккаунт."""
+        """Сканирует все группы/каналы в которых состоит аккаунт.
+
+        Если joined-группа совпадает с явно добавленной (по username) — пропускаем,
+        она уже обработана в round-robin. Если группа есть в БД и у неё назначены
+        категории — используем только их; иначе — все категории.
+        """
         try:
             dialogs = await client.get_dialogs()
         except Exception as e:
@@ -367,21 +390,30 @@ class ParserManager:
             if not (dialog.is_group or dialog.is_channel):
                 continue
 
-            # Пропускаем явно добавленные группы (они уже обработаны round-robin)
             entity = dialog.entity
             username = getattr(entity, "username", None)
-            if username and _extract_username(username) in skip_links:
+            norm_username = _extract_username(username) if username else None
+
+            # Пропускаем явно добавленные группы (они уже обработаны round-robin)
+            if norm_username and norm_username in skip_links:
                 continue
 
             chat_id = dialog.id
             is_channel = dialog.is_channel and not dialog.is_group
+
+            # Выбираем категории: если группа есть в БД с назначенными → используем их
+            if norm_username and norm_username in link_to_group:
+                grp_db = link_to_group[norm_username]
+                group_cats = group_cat_map.get(grp_db.id) or categories
+            else:
+                group_cats = categories
 
             try:
                 async with async_session() as session:
                     async for message in client.iter_messages(chat_id, limit=50):
                         if not message.text:
                             continue
-                        await self._handle_message(session, message, categories, acc_id, cat_acc_map)
+                        await self._handle_message(session, message, group_cats, acc_id, cat_acc_map)
 
                     # Комментарии к постам канала
                     if is_channel:
@@ -394,7 +426,7 @@ class ParserManager:
                                 ):
                                     if not comment.text:
                                         continue
-                                    await self._handle_message(session, comment, categories, acc_id, cat_acc_map)
+                                    await self._handle_message(session, comment, group_cats, acc_id, cat_acc_map)
                             except Exception:
                                 pass
             except FloodWaitError as e:
