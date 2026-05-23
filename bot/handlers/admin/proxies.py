@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.keyboards import proxies_list_kb, cancel_kb
 from bot.states import ProxySG
 from database.models import Proxy
+from parser.manager import parser_manager
 
 router = Router(name="admin_proxies")
 
@@ -112,6 +113,7 @@ async def process_proxy_add(message: Message, state: FSMContext, session: AsyncS
         proxy = Proxy(host=host, port=port, type=ptype, username=username, password=password)
         session.add(proxy)
         await session.commit()
+        await parser_manager.reload_clients()
 
         result = await session.execute(select(Proxy))
         proxies = result.scalars().all()
@@ -134,6 +136,7 @@ async def cb_proxy_delete(callback: CallbackQuery, session: AsyncSession) -> Non
     if proxy:
         await session.delete(proxy)
         await session.commit()
+        await parser_manager.reload_clients()
         await callback.answer("✅ Прокси удалён.", show_alert=True)
     else:
         await callback.answer("Не найден.", show_alert=True)
