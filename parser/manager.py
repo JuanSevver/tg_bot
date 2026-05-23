@@ -21,7 +21,6 @@ from telethon.errors import (
     AuthKeyUnregisteredError, UserDeactivatedError, FloodWaitError,
     SessionPasswordNeededError,
 )
-from thefuzz import fuzz
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -36,12 +35,6 @@ if TYPE_CHECKING:
     from aiogram import Bot
 
 logger = logging.getLogger(__name__)
-
-# Порог схожести для однословных ключей и минус-слов.
-# 85 — ловит опечатки в 1 символ (логатип→логотип = 85.7%), но отсекает
-# ложные совпадения по похожим окончаниям (-ение/-ание и т.п., ≤72%).
-FUZZY_THRESHOLD = 85
-
 
 def _extract_username(link: str) -> str:
     """Нормализует ссылку на группу к юзернейму (без @, в нижнем регистре).
@@ -60,68 +53,28 @@ def _extract_username(link: str) -> str:
     # Убираем trailing slash, query params, пути вида joinchat/...
     link = link.split("/")[0].split("?")[0]
     return link
-# Порог схожести для многословных фраз (сравниваем всю фразу с окном текста)
-PHRASE_THRESHOLD = 78
 
 
 def _match_phrase(phrase: str, text: str) -> bool:
-    """
-    Проверяет наличие фразы в тексте.
+    """Проверяет наличие ключевой фразы в тексте — строгий поиск подстрок.
 
-    Однословная фраза:
-      Нечёткое сравнение с каждым словом текста (token-level fuzzy).
-
-    Многословная фраза:
-      1. Сначала точное вхождение всей фразы как подстроки.
-      2. Затем скользящее окно по тексту той же длины:
-         сравниваем всю фразу с каждым окном целиком (phrase-level fuzzy).
-         Это гарантирует что ВСЕ слова фразы должны быть рядом.
+    Оба аргумента приводятся к нижнему регистру перед сравнением.
+    «дизайн» найдёт «дизайнер», «дизайна», «графическим дизайном» и т.д.
+    Многословная фраза «ищу дизайнера» найдёт только точное вхождение подстроки.
     """
     phrase = phrase.strip().lower()
     text = text.strip().lower()
-    phrase_words = phrase.split()
-    text_words = text.split()
-
-    if not phrase_words or not text_words:
+    if not phrase or not text:
         return False
-
-    # Однословная фраза — partial_ratio чтобы ловить словоформы (дизайн→дизайнер)
-    if len(phrase_words) == 1:
-        return any(fuzz.partial_ratio(phrase_words[0], w) >= FUZZY_THRESHOLD for w in text_words)
-
-    # Многословная фраза
-
-    # 1. Точное вхождение целой фразы
-    if phrase in text:
-        return True
-
-    # 2. Скользящее окно: каждое слово фразы должно иметь fuzzy-пару в окне
-    #    Окно = кол-во слов фразы + 3 (запас на вставленные слова между ключевыми)
-    window_size = len(phrase_words) + 3
-    for i in range(max(1, len(text_words) - window_size + 1)):
-        window_words = text_words[i: i + window_size]
-        if all(
-            any(fuzz.ratio(pw, ww) >= FUZZY_THRESHOLD for ww in window_words)
-            for pw in phrase_words
-        ):
-            return True
-
-    return False
+    return phrase in text
 
 
 def _has_stop_word(stop_words: list[str], text: str) -> bool:
-    """Возвращает True если в тексте найдено хотя бы одно минус-слово."""
+    """Возвращает True если в тексте найдено хотя бы одно минус-слово (подстрока)."""
     text_lower = text.lower()
-    text_words = text_lower.split()
     for sw in stop_words:
         sw = sw.strip().lower()
-        if not sw:
-            continue
-        # Точное вхождение
-        if sw in text_lower:
-            return True
-        # Нечёткое — только для одиночных слов
-        if " " not in sw and any(fuzz.ratio(sw, w) >= FUZZY_THRESHOLD for w in text_words):
+        if sw and sw in text_lower:
             return True
     return False
 

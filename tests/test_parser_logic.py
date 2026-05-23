@@ -68,16 +68,16 @@ class TestExtractUsername:
 # ─── _match_phrase ────────────────────────────────────────────────────────────
 
 class TestMatchPhrase:
-    # Single-word phrases
+    # Точное вхождение
     def test_exact_word_match(self):
         assert _match_phrase("логотип", "нужен логотип для компании")
 
-    def test_fuzzy_word_match_typo(self):
-        # "логатип" is close to "логотип"
-        assert _match_phrase("логотип", "нужен логатип срочно")
+    def test_typo_no_match(self):
+        # Строгий поиск — опечатки НЕ матчатся
+        assert not _match_phrase("логотип", "нужен логатип срочно")
 
     def test_word_inside_longer_word(self):
-        # "дизайн" found inside "дизайнера"
+        # "дизайн" найден внутри "дизайнера" как подстрока
         assert _match_phrase("дизайн", "ищу дизайнера")
 
     def test_no_match_unrelated_word(self):
@@ -86,17 +86,17 @@ class TestMatchPhrase:
     def test_case_insensitive(self):
         assert _match_phrase("логотип", "НУЖЕН ЛОГОТИП СРОЧНО")
 
-    # Multi-word phrases
+    # Многословные фразы
     def test_exact_phrase_match(self):
         assert _match_phrase("ищу дизайнера", "срочно ищу дизайнера для проекта")
 
     def test_phrase_not_matched_partially(self):
-        # "ищу дизайнера" should NOT match text that only has "ищу разработчика"
+        # "ищу дизайнера" не матчится, если только "ищу разработчика"
         assert not _match_phrase("ищу дизайнера", "ищу разработчика для проекта")
 
-    def test_phrase_fuzzy_window_match(self):
-        # Words present but slightly differently ordered / spaced
-        assert _match_phrase("нужен логотип", "очень нужен хороший логотип")
+    def test_phrase_not_matched_with_word_between(self):
+        # Строгий поиск: "нужен логотип" ≠ "нужен хороший логотип" (слово между)
+        assert not _match_phrase("нужен логотип", "очень нужен хороший логотип")
 
     def test_empty_phrase_no_match(self):
         assert not _match_phrase("", "любой текст")
@@ -117,9 +117,9 @@ class TestHasStopWord:
     def test_no_stop_word_in_text(self):
         assert not _has_stop_word(["предлагаю", "продам"], "ищу логотип срочно")
 
-    def test_fuzzy_stop_word_match(self):
-        # "предлагаю" vs "предлогаю" (typo)
-        assert _has_stop_word(["предлагаю"], "предлогаю услуги")
+    def test_stop_word_typo_no_match(self):
+        # Строгий поиск — опечатка в минус-слове НЕ блокирует
+        assert not _has_stop_word(["предлагаю"], "предлогаю услуги")
 
     def test_empty_stop_words_never_blocks(self):
         assert not _has_stop_word([], "любой текст с чем угодно")
