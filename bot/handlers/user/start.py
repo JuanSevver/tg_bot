@@ -63,7 +63,15 @@ async def _get_or_create_user(session: AsyncSession, tg_user) -> User:
 
 
 async def _send_main_menu(message: Message | CallbackQuery, user: User) -> None:
-    text = "🏠 <b>Главное меню</b>\n━━━━━━━━━━━━━━━━━━━━━"
+    text = (
+        "🏠 <b>Главное меню</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "Добро пожаловать!\n\n"
+        "Рад приветствовать вас в боте!\n\n"
+        "📍 Вся необходимая информация находится в разделах «Поддержка» или «Инструкция».\n\n"
+        "Также вы можете зайти в «Категории» и выбрать интересующие вас темы.\n\n"
+        "Приятного использования!"
+    )
     kb = main_menu_kb(user.receiving_enabled)
     if isinstance(message, Message):
         await message.answer(text, reply_markup=kb, parse_mode="HTML")
