@@ -15,9 +15,13 @@ def cancel_kb(callback_data: str, label: str = "◀ Отмена") -> InlineKeyb
     return builder.as_markup()
 
 
-def admin_main_kb() -> InlineKeyboardMarkup:
+def admin_main_kb(bot_username: str = "") -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="👥 Пользователи", callback_data="adm:users", style="primary"))
+    if bot_username:
+        builder.row(InlineKeyboardButton(
+            text="👥 Найти пользователя",
+            switch_inline_query_current_chat="",
+        ))
     builder.row(InlineKeyboardButton(text="📢 Рассылка", callback_data="adm:broadcast", style="primary"))
     builder.row(InlineKeyboardButton(text="🔗 Группы", callback_data="adm:groups", style="primary"))
     builder.row(InlineKeyboardButton(text="🤖 Аккаунты", callback_data="adm:accounts", style="primary"))

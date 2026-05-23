@@ -65,11 +65,13 @@ async def _stats_text(session: AsyncSession) -> str:
 @router.message(Command("admin"))
 async def cmd_admin(message: Message, session: AsyncSession) -> None:
     text = await _stats_text(session)
-    await message.answer(text, reply_markup=admin_main_kb(), parse_mode="HTML")
+    bot_info = await message.bot.get_me()
+    await message.answer(text, reply_markup=admin_main_kb(bot_info.username), parse_mode="HTML")
 
 
 @router.callback_query(F.data == "adm:main")
 async def cb_admin_main(callback: CallbackQuery, session: AsyncSession) -> None:
     text = await _stats_text(session)
-    await callback.message.edit_text(text, reply_markup=admin_main_kb(), parse_mode="HTML")
+    bot_info = await callback.bot.get_me()
+    await callback.message.edit_text(text, reply_markup=admin_main_kb(bot_info.username), parse_mode="HTML")
     await callback.answer()
